@@ -104,6 +104,7 @@ def count_parameters(model: AutoModelForSequenceClassification) -> tuple[int, in
 
 def build_training_arguments(args: argparse.Namespace, model_root: Path, logs_dir: Path) -> TrainingArguments:
     """Build TrainingArguments with compatibility across transformers versions."""
+    supported_parameters = inspect.signature(TrainingArguments.__init__).parameters
     training_kwargs = {
         "output_dir": str(model_root),
         "learning_rate": args.learning_rate,
@@ -111,25 +112,47 @@ def build_training_arguments(args: argparse.Namespace, model_root: Path, logs_di
         "per_device_eval_batch_size": args.per_device_eval_batch_size,
         "num_train_epochs": args.num_train_epochs,
         "weight_decay": args.weight_decay,
-        "save_strategy": "epoch",
-        "load_best_model_at_end": True,
-        "metric_for_best_model": "macro_f1",
-        "greater_is_better": True,
         "logging_dir": str(logs_dir),
-        "logging_strategy": "epoch",
         "seed": args.seed,
-        "save_total_limit": 1,
-        "report_to": [],
-        "overwrite_output_dir": True,
         "fp16": False,
     }
 
-    if "eval_strategy" in inspect.signature(TrainingArguments.__init__).parameters:
+    if "report_to" in supported_parameters:
+        training_kwargs["report_to"] = []
+
+    if "overwrite_output_dir" in supported_parameters:
+        training_kwargs["overwrite_output_dir"] = True
+
+    if "eval_strategy" in supported_parameters:
         training_kwargs["eval_strategy"] = "epoch"
-    else:
+    elif "evaluation_strategy" in supported_parameters:
         training_kwargs["evaluation_strategy"] = "epoch"
 
-    return TrainingArguments(**training_kwargs)
+    if "logging_strategy" in supported_parameters:
+        training_kwargs["logging_strategy"] = "epoch"
+
+    can_save_by_epoch = "save_strategy" in supported_parameters
+    can_select_best_model = (
+        can_save_by_epoch
+        and "load_best_model_at_end" in supported_parameters
+        and "metric_for_best_model" in supported_parameters
+        and "greater_is_better" in supported_parameters
+        and ("eval_strategy" in supported_parameters or "evaluation_strategy" in supported_parameters)
+    )
+
+    if can_save_by_epoch:
+        training_kwargs["save_strategy"] = "epoch"
+
+    if "save_total_limit" in supported_parameters:
+        training_kwargs["save_total_limit"] = 1
+
+    if can_select_best_model:
+        training_kwargs["load_best_model_at_end"] = True
+        training_kwargs["metric_for_best_model"] = "macro_f1"
+        training_kwargs["greater_is_better"] = True
+
+    filtered_kwargs = {key: value for key, value in training_kwargs.items() if key in supported_parameters}
+    return TrainingArguments(**filtered_kwargs)
 
 
 def main() -> None:

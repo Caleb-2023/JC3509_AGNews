@@ -155,6 +155,34 @@ def build_training_arguments(args: argparse.Namespace, model_root: Path, logs_di
     return TrainingArguments(**filtered_kwargs)
 
 
+def build_trainer(
+    model: AutoModelForSequenceClassification,
+    training_args: TrainingArguments,
+    tokenized_train: Dataset,
+    tokenized_val: Dataset,
+    tokenizer: AutoTokenizer,
+    compute_metrics,
+) -> Trainer:
+    """Build a Trainer instance with compatibility across transformers versions."""
+    supported_parameters = inspect.signature(Trainer.__init__).parameters
+    trainer_kwargs = {
+        "model": model,
+        "args": training_args,
+        "train_dataset": tokenized_train,
+        "eval_dataset": tokenized_val,
+        "data_collator": default_data_collator,
+        "compute_metrics": compute_metrics,
+    }
+
+    if "tokenizer" in supported_parameters:
+        trainer_kwargs["tokenizer"] = tokenizer
+    elif "processing_class" in supported_parameters:
+        trainer_kwargs["processing_class"] = tokenizer
+
+    filtered_kwargs = {key: value for key, value in trainer_kwargs.items() if key in supported_parameters}
+    return Trainer(**filtered_kwargs)
+
+
 def main() -> None:
     """Run the full DistilBERT fine-tuning experiment."""
     args = parse_args()
@@ -221,13 +249,12 @@ def main() -> None:
 
     training_args = build_training_arguments(args, model_root, logs_dir)
 
-    trainer = Trainer(
+    trainer = build_trainer(
         model=model,
-        args=training_args,
-        train_dataset=tokenized_train,
-        eval_dataset=tokenized_val,
+        training_args=training_args,
+        tokenized_train=tokenized_train,
+        tokenized_val=tokenized_val,
         tokenizer=tokenizer,
-        data_collator=default_data_collator,
         compute_metrics=compute_metrics,
     )
 
